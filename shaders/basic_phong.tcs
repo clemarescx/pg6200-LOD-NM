@@ -1,0 +1,128 @@
+#version 430 core
+layout (vertices = 3) out;
+
+// data points of a bezier triangle patch
+// + variables for pass-through elements
+struct btPatch
+{
+    // 10 control points on Bezier triangle
+    vec3 bpoint_030;
+    vec3 bpoint_021;
+    vec3 bpoint_012;
+    vec3 bpoint_003;
+    vec3 bpoint_102;
+    vec3 bpoint_201;
+    vec3 bpoint_300;
+    vec3 bpoint_210;
+    vec3 bpoint_120;
+    vec3 bpoint_111;
+	vec3 te_Normal[3];
+    vec2 te_Texture_coords[3];
+    vec3 te_View[3];
+    vec3 te_Light[3];
+};
+
+// attributes of the output CPs
+out patch btPatch bt;
+
+uniform bool distance_LOD_enabled;
+uniform float TessLevel;
+
+const vec3 eyeOrigin = vec3(0.f);
+
+in vec2 tc_Texture_coords[];
+in vec3 tc_Normal[];
+in vec3 tc_View[];
+in vec3 tc_Light[];
+in vec3 tc_Position[];
+
+vec3 ProjectToPlane(vec3 Point, vec3 PlanePoint, vec3 PlaneNormal)
+{
+    vec3 v = (Point - PlanePoint);
+    float Len = dot(v, PlaneNormal);
+    vec3 d = Len * PlaneNormal;
+    return (Point - d);
+}
+
+float tessLevelPerDistance(float distance0, float distance1)
+{
+    float avgDistance = (distance0 + distance1);
+    return 48.f/avgDistance;
+} 
+
+void calcPositions(){
+    
+    // The original vertices are the end vertices of the bezier triangle
+    bt.bpoint_030 = tc_Position[0];
+    bt.bpoint_003 = tc_Position[1];
+    bt.bpoint_300 = tc_Position[2];
+
+    // Edges are named according to the opposing vertex
+    vec3 EdgeB300 = (bt.bpoint_003 - bt.bpoint_030);
+    vec3 EdgeB030 = (bt.bpoint_300 - bt.bpoint_003);
+    vec3 EdgeB003 = (bt.bpoint_030 - bt.bpoint_300);
+
+    // Generate two midpoints on each edge: at 1/3rd and 2/3rd
+    bt.bpoint_021 = bt.bpoint_030 + EdgeB300 / 3.0;
+    bt.bpoint_012 = bt.bpoint_030 + EdgeB300 * 2.0 / 3.0;
+    bt.bpoint_102 = bt.bpoint_003 + EdgeB030 / 3.0;
+    bt.bpoint_201 = bt.bpoint_003 + EdgeB030 * 2.0 / 3.0;
+    bt.bpoint_210 = bt.bpoint_300 + EdgeB003 / 3.0;
+    bt.bpoint_120 = bt.bpoint_300 + EdgeB003 * 2.0 / 3.0;
+
+    // Project each midpoint on the plane defined by the nearest vertex and its normal
+    bt.bpoint_021 = ProjectToPlane(bt.bpoint_021, bt.bpoint_030, bt.te_Normal[0]);
+    bt.bpoint_120 = ProjectToPlane(bt.bpoint_120, bt.bpoint_030, bt.te_Normal[0]);    
+    bt.bpoint_012 = ProjectToPlane(bt.bpoint_012, bt.bpoint_003, bt.te_Normal[1]);
+    bt.bpoint_102 = ProjectToPlane(bt.bpoint_102, bt.bpoint_003, bt.te_Normal[1]);
+    bt.bpoint_201 = ProjectToPlane(bt.bpoint_201, bt.bpoint_300, bt.te_Normal[2]);
+    bt.bpoint_210 = ProjectToPlane(bt.bpoint_210, bt.bpoint_300, bt.te_Normal[2]);
+		
+
+    // Handle the center
+    vec3 Center = (   bt.bpoint_003 
+                    + bt.bpoint_030 
+                    + bt.bpoint_300) / 3.0;
+
+    bt.bpoint_111 = ( bt.bpoint_021 
+                    + bt.bpoint_012 
+                    + bt.bpoint_102 
+                    + bt.bpoint_201 
+                    + bt.bpoint_210 
+                    + bt.bpoint_120) / 6.0;
+
+    bt.bpoint_111 += (bt.bpoint_111 - Center) / 2.0;
+}
+
+void main(){
+    
+    // pass through:
+    for (int i = 0; i < 3; i++){
+        bt.te_Texture_coords[i] = tc_Texture_coords[i];
+		bt.te_Normal[i] = tc_Normal[i];
+        bt.te_View[i] = tc_View[i];
+        bt.te_Light[i] = tc_Light[i];
+    }
+    
+calcPositions();
+
+    if(distance_LOD_enabled){
+
+        float eyeToVertexDistance0 = distance(eyeOrigin, tc_Position[0]);
+        float eyeToVertexDistance1 = distance(eyeOrigin, tc_Position[1]);
+        float eyeToVertexDistance2 = distance(eyeOrigin, tc_Position[2]);
+
+	
+	    gl_TessLevelOuter[0] = tessLevelPerDistance( eyeToVertexDistance1, eyeToVertexDistance2 );
+        gl_TessLevelOuter[1] = tessLevelPerDistance( eyeToVertexDistance2, eyeToVertexDistance0 );
+        gl_TessLevelOuter[2] = tessLevelPerDistance( eyeToVertexDistance0, eyeToVertexDistance1 );
+        gl_TessLevelInner[0] = gl_TessLevelOuter[2];
+    } 
+    else {
+        gl_TessLevelOuter[0] = TessLevel;
+        gl_TessLevelOuter[1] = TessLevel;
+        gl_TessLevelOuter[2] = TessLevel;
+        gl_TessLevelInner[0] = TessLevel;
+    }
+    
+}
